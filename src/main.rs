@@ -118,11 +118,6 @@ fn main() -> Result<()> {
             for token in &page.tokens {
                 let orientation = token.layout.orientation.unwrap_or_default();
 
-                if orientation != model::Orientation::PageUp {
-                    eprintln!("info: skipping {:?} token on page {}", orientation, page.page_number);
-                    continue;
-                }
-
                 let vertices = &token.layout.bounding_poly.normalized_vertices;
                 let tb = match transform::compute_token_box(vertices, orientation, page_width, page_height) {
                     Ok(tb) => tb,

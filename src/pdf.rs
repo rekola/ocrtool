@@ -312,9 +312,6 @@ pub fn build_text_stream(tokens: &[(TokenBox, String)]) -> Vec<u8> {
     out.extend_from_slice(b"BT\n/OCR_F1 1 Tf\n3 Tr\n");
 
     for (tb, text) in tokens {
-        if tb.orientation != Orientation::PageUp {
-            continue;
-        }
         let trimmed = text.trim_end();
         if trimmed.is_empty() || tb.height < 0.001 || tb.width < 0.001 {
             continue;
@@ -323,26 +320,42 @@ pub fn build_text_stream(tokens: &[(TokenBox, String)]) -> Vec<u8> {
         // Encode as WinAnsiEncoding, covering Latin-1 and Windows-1252 extended chars.
         let encoded: Vec<u8> = trimmed.chars().map(winansi_encode).collect();
 
-        // Horizontal scale: stretch glyphs to fill the token bounding box width.
-        // natural_width = sum_of_advances * font_size / 1000  (font_size = tb.height since Tf=1)
+        // For rotated text the font size comes from the bbox dimension perpendicular to the
+        // advance direction; the advance fills the other dimension.
+        //   PAGE_UP / PAGE_DOWN : characters stand upright  → fs = height, fill width
+        //   PAGE_LEFT / PAGE_RIGHT: characters lie sideways → fs = width,  fill height
+        let (fs, desired_advance) = match tb.orientation {
+            Orientation::PageUp | Orientation::PageDown => (tb.height, tb.width),
+            Orientation::PageLeft | Orientation::PageRight => (tb.width, tb.height),
+        };
+
         let sum_advances: f64 = encoded.iter().map(|&b| helvetica_width(b) as f64).sum();
-        let natural_width = sum_advances * tb.height / 1000.0;
+        let natural_width = sum_advances * fs / 1000.0;
         let tz_percent = if natural_width > 0.001 {
-            (tb.width / natural_width * 100.0).clamp(10.0, 1000.0)
+            (desired_advance / natural_width * 100.0).clamp(10.0, 1000.0)
         } else {
             100.0
         };
 
-        // Text matrix: diagonal sets effective font size (Tf size=1, so h acts as font size).
+        // Text matrix [a b c d tx ty] Tm — rotation derived from standard 2-D rotation:
+        //   a = fs·cos θ,  b = fs·sin θ,  c = -fs·sin θ,  d = fs·cos θ
+        // Origin is the point from which the advance direction departs the bounding box.
+        let (a, b, c, d, tx, ty) = match tb.orientation {
+            Orientation::PageUp =>
+                ( fs,  0.0,  0.0,  fs, tb.x,            tb.y),
+            Orientation::PageRight =>       // 90° clockwise: advance goes down
+                (0.0,  -fs,   fs, 0.0, tb.x,            tb.y + tb.height),
+            Orientation::PageLeft =>        // 90° counter-clockwise: advance goes up
+                (0.0,   fs,  -fs, 0.0, tb.x + tb.width, tb.y),
+            Orientation::PageDown =>        // 180°: advance goes left
+                ( -fs, 0.0,  0.0,  -fs, tb.x + tb.width, tb.y + tb.height),
+        };
         out.extend_from_slice(
-            format!(
-                "{:.4} 0 0 {:.4} {:.4} {:.4} Tm\n",
-                tb.height, tb.height, tb.x, tb.y
-            )
-            .as_bytes(),
+            format!("{:.4} {:.4} {:.4} {:.4} {:.4} {:.4} Tm\n", a, b, c, d, tx, ty)
+                .as_bytes(),
         );
 
-        // Per-token horizontal scale to fit bounding box width.
+        // Per-token horizontal scale to fit the bounding box in the advance direction.
         out.extend_from_slice(format!("{:.4} Tz\n", tz_percent).as_bytes());
 
         out.push(b'<');
