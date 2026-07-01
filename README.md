@@ -76,7 +76,6 @@ Each shard is parsed and dropped before the next is read, so peak heap usage is 
 ## Known limitations
 
 - **Rotated tokens** (`PAGE_LEFT`, `PAGE_RIGHT`, `PAGE_DOWN`) are logged and skipped. These are rare in practice (vertical margin labels, footnote markers).
-- **No horizontal scaling** (`Tz`): the invisible text is positioned and sized to match the token's bounding box height but not stretched to match its width. Text selection works correctly; exact cursor-position alignment is approximate.
 - **WinAnsiEncoding** (Helvetica): covers Latin-1, including Finnish/Swedish characters (ä, ö, å). Characters outside Latin-1 are replaced with `?`.
 - Shards must be passed in ascending `shardIndex` order. The tool processes them in the order given on the command line.
 
