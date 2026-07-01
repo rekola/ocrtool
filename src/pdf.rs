@@ -41,10 +41,80 @@ fn obj_to_f64(o: &Object) -> Result<f64> {
     }
 }
 
+/// Encode a Unicode char to its WinAnsiEncoding byte.
+///
+/// U+0020–U+00FF map directly (Latin-1 range).
+/// U+0100+ characters that exist in Windows-1252 (0x80–0x9F) are mapped;
+/// everything else falls back to '?'.
+fn winansi_encode(c: char) -> u8 {
+    let cp = c as u32;
+    if (0x0020..=0x00FF).contains(&cp) {
+        return cp as u8;
+    }
+    match c {
+        '\u{20AC}' => 0x80, // €
+        '\u{201A}' => 0x82, // ‚
+        '\u{0192}' => 0x83, // ƒ
+        '\u{201E}' => 0x84, // „
+        '\u{2026}' => 0x85, // …
+        '\u{2020}' => 0x86, // †
+        '\u{2021}' => 0x87, // ‡
+        '\u{02C6}' => 0x88, // ˆ
+        '\u{2030}' => 0x89, // ‰
+        '\u{0160}' => 0x8A, // Š
+        '\u{2039}' => 0x8B, // ‹
+        '\u{0152}' => 0x8C, // Œ
+        '\u{017D}' => 0x8E, // Ž
+        '\u{2018}' => 0x91, // '
+        '\u{2019}' => 0x92, // '
+        '\u{201C}' => 0x93, // "
+        '\u{201D}' => 0x94, // "
+        '\u{2022}' => 0x95, // •
+        '\u{2013}' => 0x96, // –
+        '\u{2014}' => 0x97, // —
+        '\u{02DC}' => 0x98, // ˜
+        '\u{2122}' => 0x99, // ™
+        '\u{0161}' => 0x9A, // š
+        '\u{203A}' => 0x9B, // ›
+        '\u{0153}' => 0x9C, // œ
+        '\u{017E}' => 0x9E, // ž
+        '\u{0178}' => 0x9F, // Ÿ
+        _ => b'?',
+    }
+}
+
 /// Helvetica advance widths (WinAnsiEncoding) in units per 1000 em.
 /// Source: Adobe Helvetica AFM file.
 fn helvetica_width(byte: u8) -> u32 {
     match byte {
+        // Windows-1252 extended range (0x80–0x9F)
+        0x80 => 556,  // €
+        0x82 => 222,  // ‚  (quotesinglbase)
+        0x83 => 278,  // ƒ  (florin)
+        0x84 => 556,  // „  (quotedblbase)
+        0x85 => 1000, // …  (ellipsis)
+        0x86 => 556,  // †  (dagger)
+        0x87 => 556,  // ‡  (daggerdbl)
+        0x88 => 333,  // ˆ  (circumflex)
+        0x89 => 1000, // ‰  (perthousand)
+        0x8A => 667,  // Š  (Scaron)
+        0x8B => 333,  // ‹  (guilsinglleft)
+        0x8C => 1000, // Œ  (OE)
+        0x8E => 611,  // Ž  (Zcaron)
+        0x91 => 222,  // '  (quoteleft)
+        0x92 => 222,  // '  (quoteright)
+        0x93 => 333,  // "  (quotedblleft)
+        0x94 => 333,  // "  (quotedblright)
+        0x95 => 350,  // •  (bullet)
+        0x96 => 556,  // –  (endash)
+        0x97 => 1000, // —  (emdash)
+        0x98 => 333,  // ˜  (tilde)
+        0x99 => 737,  // ™  (trademark)
+        0x9A => 500,  // š  (scaron)
+        0x9B => 333,  // ›  (guilsinglright)
+        0x9C => 944,  // œ  (oe)
+        0x9E => 500,  // ž  (zcaron)
+        0x9F => 667,  // Ÿ  (Ydieresis)
         0x20 => 278, // space
         0x21 => 278, // !
         0x22 => 355, // "
@@ -250,11 +320,8 @@ pub fn build_text_stream(tokens: &[(TokenBox, String)]) -> Vec<u8> {
             continue;
         }
 
-        // Encode as WinAnsiEncoding (Latin-1 chars map directly by codepoint value).
-        let encoded: Vec<u8> = trimmed
-            .chars()
-            .map(|c| if (c as u32) < 256 { c as u8 } else { b'?' })
-            .collect();
+        // Encode as WinAnsiEncoding, covering Latin-1 and Windows-1252 extended chars.
+        let encoded: Vec<u8> = trimmed.chars().map(winansi_encode).collect();
 
         // Horizontal scale: stretch glyphs to fill the token bounding box width.
         // natural_width = sum_of_advances * font_size / 1000  (font_size = tb.height since Tf=1)
